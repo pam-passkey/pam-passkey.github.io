@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-rSxsV9OQhyB+FOgsR16OoN8C6sU7CWoL0Dhu8HQoq9w='; style-src 'sha256-iwkzFdDG313EDOH0ez1xFAmfqL0w62n9foZ1Z6kCcvY='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>pam-passkey</title>
+<style>
+:root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fff; --muted: #6e6e73; --line: #d2d2d7; --chip: #f2f2f5; --warn: #b3261e; --ok: #1b7f3b; --accent: #0a66d8; }
+@media (prefers-color-scheme: dark) { :root { --fg: #f5f5f7; --bg: #1c1c1e; --muted: #a1a1a6; --line: #3a3a3c; --chip: #2c2c2e; --warn: #ff6b60; --ok: #4cd07a; --accent: #4c9bff; } }
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans", sans-serif; color: var(--fg); background: var(--bg); }
+main { max-width: 46rem; margin: 0 auto; padding: 1rem 1rem 3rem; }
+h1 { font-size: 1.3rem; margin: 0.5rem 0 0.25rem; }
+h2 { font-size: 1rem; margin: 1.25rem 0 0.4rem; color: var(--muted); font-weight: 600; }
+p { margin: 0.4rem 0; }
+.lead { font-weight: 600; }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.9rem; margin: 0.5rem 0; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+.value { white-space: pre-wrap; overflow-wrap: anywhere; }
+.none { color: var(--muted); }
+.esc { font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; color: var(--warn); border: 1px solid var(--warn); border-radius: 3px; padding: 0 2px; margin: 0 1px; }
+.omitted { font-size: 0.85em; color: var(--warn); font-style: italic; }
+ol.argv { list-style: none; padding: 0; margin: 0.3rem 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+ol.argv li { font-family: ui-monospace, Menlo, monospace; background: var(--chip); border: 1px solid var(--line); border-radius: 4px; padding: 0.05rem 0.35rem; max-width: 100%; }
+ol.chain { list-style: none; padding: 0; margin: 0.3rem 0; }
+ol.chain li { border-left: 2px solid var(--line); margin: 0.15rem 0; padding-left: 0.5rem; }
+ol.chain summary { cursor: pointer; overflow-wrap: anywhere; }
+ol.chain .name { font-weight: 600; }
+ol.chain .sig, ol.chain .who { color: var(--muted); margin-left: 0.4rem; }
+.badge { font-size: 0.75rem; border-radius: 3px; padding: 0 0.3rem; margin-left: 0.4rem; border: 1px solid var(--line); white-space: nowrap; }
+li.unsigned { border-left-color: var(--warn); }
+li.unsigned .badge, li.adhoc .badge { color: var(--warn); border-color: var(--warn); }
+li.platform .badge { color: var(--muted); }
+li.caller { border-left-color: var(--accent); }
+ol.chain dl.facts { font-size: 0.9rem; margin-left: 0.4rem; }
+.actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0 0.75rem; }
+button { font: inherit; font-weight: 600; padding: 0.65rem 1.2rem; border-radius: 8px; border: 1px solid var(--line); background: var(--chip); color: var(--fg); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: 0.45; cursor: default; }
+#status { min-height: 1.5rem; font-weight: 600; }
+#status.ok { color: var(--ok); }
+#status.bad { color: var(--warn); }
+.countdown { color: var(--muted); }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+"use strict";
+(() => {
+  const MAX_PAYLOAD = 64 * 1024;
+  const POLL_SLOW = 3000;
+  const POLL_FAST = 1000;
+  const RESULT_WAIT = 10000;
+
+  const MESSAGES = {
+    en: {
+      title: "pam-passkey",
+      intro: "This page approves authentication requests and registers passkeys for pam-passkey. Open it through the URL that pam-passkey on your Mac shows or sends.",
+      project: "About pam-passkey",
+      loading: "Loading the request…",
+      bad_url: "The URL does not point to a request.",
+      fetch_failed: "Could not load the request ({0}).",
+      gone: "The request has expired or has already ended (HTTP {0}).",
+      too_large: "The request is larger than {0} bytes and was not read.",
+      bad_request: "This is not a request this page can show.",
+      approve_title: "Authentication request",
+      approve_lead: "{0} asks to authenticate {1}. Approve only if you started this yourself.",
+      host: "Host",
+      user: "User",
+      caller_uid: "Caller uid",
+      tty: "TTY",
+      time: "Requested",
+      expires: "Expires",
+      argv: "Command",
+      chain: "Process chain (launchd at the top, the caller at the bottom; tap a line for details)",
+      empty_chain: "No process information was sent.",
+      approve: "Approve with passkey",
+      reject: "Reject",
+      remaining: "{0} s left",
+      waiting_passkey: "Waiting for the passkey…",
+      sending: "Sending…",
+      sent: "Sent. Waiting for the Mac's result…",
+      rejecting: "Rejected. Waiting for the Mac's result…",
+      already_answered: "This request was already answered. Waiting for the Mac's result…",
+      passed: "Approved. The Mac accepted the passkey.",
+      failed: "Not approved. The Mac refused the answer or ended the request.",
+      ended_pass: "Already approved (on the Mac or elsewhere).",
+      ended_fail: "This request has ended (rejected, cancelled or expired).",
+      result_unknown: "Could not confirm the result.",
+      expired: "This request has expired.",
+      put_failed: "Could not send the answer ({0}).",
+      passkey_failed: "The passkey was not used ({0}).",
+      omitted: "{0} characters omitted",
+      pid: "pid",
+      uid: "uid",
+      cwd: "cwd",
+      path: "Path",
+      signing_id: "Signing ID",
+      team_id: "Team ID",
+      signer: "Signer",
+      unsigned: "unsigned",
+      adhoc: "ad-hoc signed",
+      platform: "Apple",
+      signed: "signed",
+      register_title: "Register a passkey",
+      register_lead: "Create a passkey for {0} on {1}. pam-passkey add on the Mac checks it and records it.",
+      rp_id: "Passkey site",
+      user_name: "User",
+      register: "Create passkey",
+      registered: "Sent the registration. pam-passkey add on the Mac continues from here.",
+    },
+    ja: {
+      title: "pam-passkey",
+      intro: "pam-passkey の認証の承認と passkey の登録を行うページです。Mac の pam-passkey が表示・送信する URL から開いてください。",
+      project: "pam-passkey について",
+      loading: "要求を読み込んでいます…",
+      bad_url: "URL が要求を指していません。",
+      fetch_failed: "要求を読み込めませんでした ({0})。",
+      gone: "要求は期限切れか、既に終了しています (HTTP {0})。",
+      too_large: "要求が {0} バイトを超えているため読み込みません。",
+      bad_request: "このページで表示できる要求ではありません。",
+      approve_title: "認証の要求",
+      approve_lead: "{0} が {1} の認証を求めています。自分で始めた操作の場合だけ承認してください。",
+      host: "ホスト",
+      user: "ユーザ",
+      caller_uid: "呼び出し元 uid",
+      tty: "TTY",
+      time: "要求時刻",
+      expires: "期限",
+      argv: "コマンド",
+      chain: "プロセスの系譜 (上が launchd、一番下が呼び出し元。行を押すと詳細)",
+      empty_chain: "プロセス情報は送られていません。",
+      approve: "passkey で承認",
+      reject: "拒否",
+      remaining: "残り {0} 秒",
+      waiting_passkey: "passkey の操作を待っています…",
+      sending: "送信しています…",
+      sent: "送信しました。Mac の判定を待っています…",
+      rejecting: "拒否しました。Mac の判定を待っています…",
+      already_answered: "この要求には既に回答があります。Mac の判定を待っています…",
+      passed: "承認されました。Mac が passkey を受け入れました。",
+      failed: "承認されませんでした。Mac が回答を受け入れなかったか、要求が終了しました。",
+      ended_pass: "承認済みです (Mac 側など別の手段で通りました)。",
+      ended_fail: "この要求は終了しています (拒否・キャンセル・期限切れ)。",
+      result_unknown: "結果を確認できませんでした。",
+      expired: "この要求は期限切れです。",
+      put_failed: "回答を送れませんでした ({0})。",
+      passkey_failed: "passkey は使われませんでした ({0})。",
+      omitted: "{0} 文字省略",
+      pid: "pid",
+      uid: "uid",
+      cwd: "cwd",
+      path: "実行パス",
+      signing_id: "署名 ID",
+      team_id: "Team ID",
+      signer: "署名者",
+      unsigned: "署名なし",
+      adhoc: "ad-hoc 署名",
+      platform: "Apple",
+      signed: "署名あり",
+      register_title: "passkey の登録",
+      register_lead: "{1} に {0} の passkey を作成します。Mac の pam-passkey add が検証して記録します。",
+      rp_id: "passkey のサイト",
+      user_name: "ユーザ",
+      register: "passkey を作成",
+      registered: "登録データを送りました。Mac 側の add が続きを行います。",
+    },
+  };
+  const language = String(navigator.language || "en").toLowerCase().startsWith("ja") ? "ja" : "en";
+  document.documentElement.lang = language;
+  const t = (key, ...args) =>
+    (MESSAGES[language][key] ?? MESSAGES.en[key]).replace(/\{(\d)\}/g, (_, index) => String(args[Number(index)]));
+
+  // The template of `key` with each {n} replaced by the node `values[n]`.
+  function sentence(key, ...values) {
+    const template = MESSAGES[language][key] ?? MESSAGES.en[key];
+    return template.split(/\{(\d)\}/).map((part, index) => (index % 2 ? values[Number(part)] : part));
+  }
+
+  const app = document.getElementById("app");
+
+  function element(tag, className, ...children) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    for (const child of children) node.append(child);
+    return node;
+  }
+
+  // Shown values come from the request, which anyone holding the URL could have written:
+  // control, bidi and invisible characters are made visible, and shortened values say so.
+  const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufeff\ufff9-\ufffb]/u;
+  function shown(value, limit = 160) {
+    const span = element("span", "value");
+    if (value === null || value === undefined) {
+      span.classList.add("none");
+      span.textContent = "—";
+      return span;
+    }
+    const points = Array.from(String(value));
+    const write = (part) => {
+      let run = "";
+      for (const point of part) {
+        if (HIDDEN.test(point)) {
+          if (run) span.append(run);
+          run = "";
+          span.append(element("span", "esc", "\\u{" + point.codePointAt(0).toString(16).padStart(4, "0") + "}"));
+        } else {
+          run += point;
+        }
+      }
+      if (run) span.append(run);
+    };
+    if (points.length <= limit) {
+      write(points);
+    } else {
+      const head = Math.ceil(limit / 2);
+      const tail = Math.floor(limit / 2);
+      write(points.slice(0, head));
+      span.append(element("span", "omitted", " … " + t("omitted", points.length - head - tail) + " … "));
+      write(points.slice(points.length - tail));
+    }
+    return span;
+  }
+
+  function facts(rows) {
+    const list = element("dl", "facts");
+    for (const [label, value] of rows) list.append(element("dt", null, label), element("dd", null, value));
+    return list;
+  }
+
+  function argvList(argv) {
+    if (!Array.isArray(argv)) return shown(null);
+    return element("ol", "argv", ...argv.map((arg) => element("li", null, shown(arg, 200))));
+  }
+
+  function localTime(text) {
+    const date = new Date(String(text));
+    return Number.isNaN(date.getTime()) ? shown(text) : shown(date.toLocaleString(language));
+  }
+
+  function bytesToBase64url(buffer) {
+    let binary = "";
+    for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function base64urlToBytes(text) {
+    if (typeof text !== "string" || !/^[A-Za-z0-9_-]*$/.test(text) || text.length % 4 === 1) {
+      throw new Error("not base64url");
+    }
+    const padded = text.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((text.length + 3) % 4);
+    return Uint8Array.from(atob(padded), (symbol) => symbol.charCodeAt(0));
+  }
+
+  function httpsUrl(text) {
+    const url = new URL(String(text));
+    if (url.protocol !== "https:") throw new Error("not https");
+    return url;
+  }
+
+  const fetchOptions = { cache: "no-store", credentials: "omit", redirect: "error", referrerPolicy: "no-referrer" };
+
+  // The presigned PUT is write-once when the store signed If-None-Match into it (put_once).
+  async function put(url, text) {
+    const headers = {};
+    const signed = (url.searchParams.get("X-Amz-SignedHeaders") || "").toLowerCase().split(";");
+    if (signed.includes("if-none-match")) headers["If-None-Match"] = "*";
+    return fetch(url, { ...fetchOptions, method: "PUT", headers, body: new TextEncoder().encode(text) });
+  }
+
+  // The request's conclusion (DR-0006): "pass", "fail", or null while there is none.
+  async function readResult(url) {
+    try {
+      const response = await fetch(url, fetchOptions);
+      if (response.status !== 200) return null;
+      const text = (await response.text()).trim();
+      return text === "pass" || text === "fail" ? text : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function statusLine() {
+    const line = element("p", null);
+    line.id = "status";
+    line.setAttribute("role", "status");
+    return line;
+  }
+
+  function setStatus(line, text, tone) {
+    line.textContent = text;
+    line.className = tone || "";
+  }
+
+  function signingKind(process) {
+    if (!process.signing_id) return "unsigned";
+    if (!process.signer) return "adhoc";
+    if (!process.team_id && process.signer === "Software Signing") return "platform";
+    return "signed";
+  }
+
+  function processName(process) {
+    const source = process.path || (Array.isArray(process.argv) && process.argv[0]) || "";
+    const name = String(source).split("/").pop();
+    return name || "pid " + process.pid;
+  }
+
+  function chain(processes) {
+    if (!Array.isArray(processes) || processes.length === 0) return element("p", "none", t("empty_chain"));
+    const list = element("ol", "chain");
+    // The request lists the caller first; draw it as pstree does, from launchd down.
+    const ordered = processes.slice().reverse();
+    ordered.forEach((entry, depth) => {
+      const process = typeof entry === "object" && entry !== null ? entry : {};
+      const kind = signingKind(process);
+      const signature = process.team_id
+        ? element("span", "sig", shown(process.signing_id, 60), " (", shown(process.team_id, 20), ")")
+        : element("span", "sig", shown(process.signing_id, 60));
+      const who = process.uid === 0 ? element("span", "who", "root") : element("span", "who", "uid ", shown(process.uid, 12));
+      const summary = element("summary", null, element("span", "name", shown(processName(process), 60)), signature, who, element("span", "badge", t(kind)));
+      const details = element("details", null, summary, facts([
+        [t("pid"), shown(process.pid)],
+        [t("uid"), shown(process.uid)],
+        [t("cwd"), shown(process.cwd, 240)],
+        [t("path"), shown(process.path, 240)],
+        [t("argv"), argvList(process.argv)],
+        [t("signing_id"), shown(process.signing_id)],
+        [t("team_id"), shown(process.team_id)],
+        [t("signer"), shown(process.signer)],
+      ]));
+      const item = element("li", kind + (depth === ordered.length - 1 ? " caller" : ""), details);
+      item.style.marginLeft = Math.min(depth, 12) * 0.5 + "rem";
+      list.append(item);
+    });
+    return list;
+  }
+
+  function countdown(expiresAt, onExpired) {
+    const label = element("span", "countdown");
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+      label.textContent = t("remaining", left);
+      if (left === 0) {
+        clearInterval(timer);
+        onExpired();
+      }
+    };
+    const timer = setInterval(tick, 1000);
+    tick();
+    return label;
+  }
+
+  function approve(request, challenge) {
+    const details = request.details;
+    const assertionUrl = httpsUrl(request.assertion_put_url);
+    const resultUrl = httpsUrl(request.result_get_url);
+    const allow = request.allow_credentials.map((id) => ({ type: "public-key", id: base64urlToBytes(id) }));
+    const expiresAt = new Date(String(request.expires)).getTime();
+    if (typeof details !== "object" || details === null || Number.isNaN(expiresAt)) throw new Error("request");
+
+    const status = statusLine();
+    const approveButton = element("button", "primary", t("approve"));
+    const rejectButton = element("button", null, t("reject"));
+    // idle → asking (passkey dialog) → sent (answer PUT, fast poll) → done.
+    let state = "idle";
+    const enable = (on) => {
+      approveButton.disabled = !on;
+      rejectButton.disabled = !on;
+    };
+    const finish = (text, tone) => {
+      state = "done";
+      enable(false);
+      setStatus(status, text, tone);
+    };
+
+    const fastPoll = async (until) => {
+      while (state === "sent") {
+        const result = await readResult(resultUrl);
+        if (state !== "sent") return;
+        if (result) return finish(t(result === "pass" ? "passed" : "failed"), result === "pass" ? "ok" : "bad");
+        if (Date.now() >= until) return finish(t("result_unknown"), "bad");
+        await new Promise((resolve) => setTimeout(resolve, POLL_FAST));
+      }
+    };
+    // Before an answer is sent, a result means the request ended some other way (Touch ID,
+    // cancel, expiry); the page shows it and offers nothing more.
+    const slowPoll = async () => {
+      while (state === "idle" || state === "asking") {
+        const result = await readResult(resultUrl);
+        if (result && (state === "idle" || state === "asking")) {
+          return finish(t(result === "pass" ? "ended_pass" : "ended_fail"), result === "pass" ? "ok" : "bad");
+        }
+        await new Promise((resolve) => setTimeout(resolve, POLL_SLOW));
+      }
+    };
+
+    const answer = async (text, waiting) => {
+      setStatus(status, t("sending"));
+      let response;
+      try {
+        response = await put(assertionUrl, text);
+      } catch (error) {
+        state = "idle";
+        enable(Date.now() < expiresAt);
+        return setStatus(status, t("put_failed", error.message), "bad");
+      }
+      if (state === "done") return;
+      if (response.ok || response.status === 412) {
+        state = "sent";
+        enable(false);
+        setStatus(status, response.ok ? waiting : t("already_answered"));
+        return fastPoll(Math.min(Date.now() + RESULT_WAIT, expiresAt));
+      }
+      if (response.status === 403) return finish(t("expired"), "bad");
+      state = "idle";
+      enable(Date.now() < expiresAt);
+      setStatus(status, t("put_failed", "HTTP " + response.status), "bad");
+    };
+
+    approveButton.addEventListener("click", async () => {
+      if (state !== "idle") return;
+      state = "asking";
+      enable(false);
+      setStatus(status, t("waiting_passkey"));
+      let credential;
+      try {
+        credential = await navigator.credentials.get({
+          publicKey: {
+            challenge,
+            rpId: location.hostname,
+            allowCredentials: allow,
+            userVerification: "required",
+            timeout: Math.max(1000, expiresAt - Date.now()),
+          },
+        });
+      } catch (error) {
+        if (state !== "asking") return;
+        state = "idle";
+        enable(Date.now() < expiresAt);
+        return setStatus(status, t("passkey_failed", error.name), "bad");
+      }
+      if (state !== "asking") return;
+      const response = credential.response;
+      await answer(JSON.stringify({
+        credential_id: bytesToBase64url(credential.rawId),
+        client_data_json: bytesToBase64url(response.clientDataJSON),
+        authenticator_data: bytesToBase64url(response.authenticatorData),
+        signature: bytesToBase64url(response.signature),
+      }), t("sent"));
+    });
+    // A refusal is unsigned content in the assertion's place (DR-0006).
+    rejectButton.addEventListener("click", async () => {
+      if (state !== "idle") return;
+      state = "asking";
+      enable(false);
+      await answer(JSON.stringify({ rejected: true }), t("rejecting"));
+    });
+
+    const remaining = countdown(expiresAt, () => {
+      if (state === "idle" || state === "asking") finish(t("expired"), "bad");
+    });
+    app.replaceChildren(
+      element("h1", null, t("approve_title")),
+      element("p", "lead", ...sentence("approve_lead", shown(details.host, 80), shown(details.user, 60))),
+      facts([
+        [t("host"), shown(details.host, 120)],
+        [t("user"), shown(details.user, 80)],
+        [t("caller_uid"), shown(details.caller_uid)],
+        [t("tty"), shown(details.tty)],
+        [t("time"), localTime(details.time)],
+        [t("expires"), element("span", null, localTime(request.expires), " ", remaining)],
+      ]),
+      element("h2", null, t("argv")),
+      argvList(details.argv),
+      element("h2", null, t("chain")),
+      chain(details.processes),
+      element("div", "actions", approveButton, rejectButton),
+      status,
+    );
+    slowPoll();
+  }
+
+  function register(payload, challenge) {
+    const putUrl = httpsUrl(payload.credential_put_url);
+    const userId = base64urlToBytes(payload.user_id);
+    const expiresAt = new Date(String(payload.expires)).getTime();
+    if (typeof payload.rp_id !== "string" || typeof payload.user_name !== "string" || Number.isNaN(expiresAt)) {
+      throw new Error("payload");
+    }
+    const status = statusLine();
+    const button = element("button", "primary", t("register"));
+    let busy = false;
+    const remaining = countdown(expiresAt, () => {
+      if (!busy) {
+        button.disabled = true;
+        setStatus(status, t("expired"), "bad");
+      }
+    });
+    button.addEventListener("click", async () => {
+      if (busy) return;
+      busy = true;
+      button.disabled = true;
+      setStatus(status, t("waiting_passkey"));
+      let credential;
+      try {
+        credential = await navigator.credentials.create({
+          publicKey: {
+            challenge,
+            rp: { id: payload.rp_id, name: "pam-passkey" },
+            user: { id: userId, name: payload.user_name, displayName: payload.user_name },
+            pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+            attestation: "none",
+            authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
+            timeout: Math.max(1000, expiresAt - Date.now()),
+          },
+        });
+      } catch (error) {
+        busy = false;
+        button.disabled = Date.now() >= expiresAt;
+        return setStatus(status, t("passkey_failed", error.name), "bad");
+      }
+      setStatus(status, t("sending"));
+      try {
+        const response = await put(putUrl, JSON.stringify({
+          credential_id: bytesToBase64url(credential.rawId),
+          client_data_json: bytesToBase64url(credential.response.clientDataJSON),
+          attestation_object: bytesToBase64url(credential.response.attestationObject),
+        }));
+        if (response.ok) return setStatus(status, t("registered"), "ok");
+        setStatus(status, response.status === 403 ? t("expired") : t("put_failed", "HTTP " + response.status), "bad");
+      } catch (error) {
+        setStatus(status, t("put_failed", error.message), "bad");
+      }
+    });
+    app.replaceChildren(
+      element("h1", null, t("register_title")),
+      element("p", "lead", ...sentence("register_lead", shown(payload.user_name, 60), shown(payload.rp_id, 80))),
+      facts([
+        [t("user_name"), shown(payload.user_name, 80)],
+        [t("rp_id"), shown(payload.rp_id, 120)],
+        [t("expires"), element("span", null, localTime(payload.expires), " ", remaining)],
+      ]),
+      element("div", "actions", button),
+      status,
+    );
+  }
+
+  function message(text, tone) {
+    const line = element("p", tone || null, text);
+    app.replaceChildren(element("h1", null, t("title")), line);
+  }
+
+  async function main() {
+    const fragment = location.hash.slice(1);
+    if (!fragment) {
+      const link = element("a", null, t("project"));
+      link.href = "https://github.com/kawaz/pam-passkey";
+      link.rel = "noreferrer";
+      app.replaceChildren(element("h1", null, t("title")), element("p", null, t("intro")), element("p", null, link));
+      return;
+    }
+    let url;
+    try {
+      url = httpsUrl(fragment);
+    } catch {
+      return message(t("bad_url"), "bad");
+    }
+    message(t("loading"));
+    let bytes;
+    try {
+      const response = await fetch(url, fetchOptions);
+      if (!response.ok) return message(t("gone", response.status), "bad");
+      bytes = new Uint8Array(await response.arrayBuffer());
+    } catch (error) {
+      return message(t("fetch_failed", error.message), "bad");
+    }
+    if (bytes.length > MAX_PAYLOAD) return message(t("too_large", MAX_PAYLOAD), "bad");
+    // The challenge is the SHA-256 of exactly the bytes shown (DR-0006).
+    const challenge = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    try {
+      const payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      if (payload && payload.kind === "approve") return approve(payload, challenge);
+      if (payload && payload.kind === "register") return register(payload, challenge);
+    } catch {
+      // Falls through to the message below.
+    }
+    message(t("bad_request"), "bad");
+  }
+
+  window.addEventListener("hashchange", () => location.reload());
+  main();
+})();
+</script>
+</body>
+</html>
