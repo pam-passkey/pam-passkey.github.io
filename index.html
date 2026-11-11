@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-c/bCAp26rMlTt4Fwmyyv+EvFCHid+OmSm2D+RvmnDDk='; style-src 'sha256-iwkzFdDG313EDOH0ez1xFAmfqL0w62n9foZ1Z6kCcvY='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-aMorX5oLclD6YEDMA7dDJQ31Hud9A99rwb5LDM5/wxo='; style-src 'sha256-UBMnHm7kXpUhTmcdmEi7Xs+e1Zd4uMHz6VNChpO50Nw='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -23,19 +23,17 @@ dl.facts dd { margin: 0; overflow-wrap: anywhere; }
 .none { color: var(--muted); }
 .esc { font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; color: var(--warn); border: 1px solid var(--warn); border-radius: 3px; padding: 0 2px; margin: 0 1px; }
 .omitted { font-size: 0.85em; color: var(--warn); font-style: italic; }
-ol.argv { list-style: none; padding: 0; margin: 0.3rem 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
-ol.argv li { font-family: ui-monospace, Menlo, monospace; background: var(--chip); border: 1px solid var(--line); border-radius: 4px; padding: 0.05rem 0.35rem; max-width: 100%; }
-ol.chain { list-style: none; padding: 0; margin: 0.3rem 0; }
-ol.chain li { border-left: 2px solid var(--line); margin: 0.15rem 0; padding-left: 0.5rem; }
-ol.chain summary { cursor: pointer; overflow-wrap: anywhere; }
-ol.chain .name { font-weight: 600; }
-ol.chain .sig, ol.chain .who { color: var(--muted); margin-left: 0.4rem; }
-.badge { font-size: 0.75rem; border-radius: 3px; padding: 0 0.3rem; margin-left: 0.4rem; border: 1px solid var(--line); white-space: nowrap; }
-li.unsigned { border-left-color: var(--warn); }
-li.unsigned .badge, li.adhoc .badge { color: var(--warn); border-color: var(--warn); }
-li.platform .badge { color: var(--muted); }
-li.caller { border-left-color: var(--accent); }
-ol.chain dl.facts { font-size: 0.9rem; margin-left: 0.4rem; }
+.mono { font-family: ui-monospace, Menlo, monospace; font-size: 0.9rem; line-height: 1.45; }
+p.block { margin: 0.2rem 0; overflow-wrap: anywhere; }
+ol.tree { list-style: none; padding: 0; margin: 0.2rem 0; }
+ol.tree summary { display: grid; grid-template-columns: max-content max-content 1fr; column-gap: 0.6rem; cursor: pointer; list-style: none; padding: 0.1rem 0; }
+ol.tree summary::-webkit-details-marker { display: none; }
+ol.tree .who { color: var(--muted); }
+ol.tree .cmd { overflow-wrap: anywhere; min-width: 0; }
+ol.tree .mark { color: var(--warn); font-size: 0.8rem; margin-left: 0.5rem; white-space: nowrap; }
+ol.tree details[open] > summary { background: var(--chip); }
+ol.tree dl.facts { font-size: 0.85rem; margin: 0.2rem 0 0.6rem; padding-left: 0.75rem; border-left: 2px solid var(--line); }
+dl.context { font-size: 0.85rem; color: var(--muted); margin-top: 1.25rem; }
 .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0 0.75rem; }
 button { font: inherit; font-weight: 600; padding: 0.65rem 1.2rem; border-radius: 8px; border: 1px solid var(--line); background: var(--chip); color: var(--fg); cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -68,16 +66,16 @@ button:disabled { opacity: 0.45; cursor: default; }
       too_large: "The request is larger than {0} bytes and was not read.",
       bad_request: "This is not a request this page can show.",
       approve_title: "Authentication request",
-      approve_lead: "{0} asks to authenticate {1}. Approve only if you started this yourself.",
       host: "Host",
       user: "User",
       caller_uid: "Caller uid",
       tty: "TTY",
       time: "Requested",
       expires: "Expires",
-      argv: "Command",
-      chain: "Process chain (launchd at the top, the caller at the bottom; tap a line for details)",
-      empty_chain: "No process information was sent.",
+      command: "Command",
+      cwd: "Working directory",
+      tree: "Process tree",
+      argv: "argv",
       approve: "Approve with passkey",
       reject: "Reject",
       touch: "Use Touch ID on this Mac",
@@ -100,15 +98,12 @@ button:disabled { opacity: 0.45; cursor: default; }
       omitted: "{0} characters omitted",
       pid: "pid",
       uid: "uid",
-      cwd: "cwd",
       path: "Path",
       signing_id: "Signing ID",
       team_id: "Team ID",
       signer: "Signer",
       unsigned: "unsigned",
       adhoc: "ad-hoc signed",
-      platform: "Apple",
-      signed: "signed",
       register_title: "Register a passkey",
       register_lead: "Create a passkey for {0} on {1}. pam-passkey add on the Mac checks it and records it.",
       rp_id: "Passkey site",
@@ -127,16 +122,16 @@ button:disabled { opacity: 0.45; cursor: default; }
       too_large: "要求が {0} バイトを超えているため読み込みません。",
       bad_request: "このページで表示できる要求ではありません。",
       approve_title: "認証の要求",
-      approve_lead: "{0} が {1} の認証を求めています。自分で始めた操作の場合だけ承認してください。",
       host: "ホスト",
       user: "ユーザ",
       caller_uid: "呼び出し元 uid",
       tty: "TTY",
       time: "要求時刻",
       expires: "期限",
-      argv: "コマンド",
-      chain: "プロセスの系譜 (上が launchd、一番下が呼び出し元。行を押すと詳細)",
-      empty_chain: "プロセス情報は送られていません。",
+      command: "実行コマンド",
+      cwd: "作業ディレクトリ",
+      tree: "プロセスツリー",
+      argv: "argv",
       approve: "passkey で承認",
       reject: "拒否",
       touch: "この Mac の Touch ID で認証",
@@ -159,15 +154,12 @@ button:disabled { opacity: 0.45; cursor: default; }
       omitted: "{0} 文字省略",
       pid: "pid",
       uid: "uid",
-      cwd: "cwd",
       path: "実行パス",
       signing_id: "署名 ID",
       team_id: "Team ID",
       signer: "署名者",
       unsigned: "署名なし",
       adhoc: "ad-hoc 署名",
-      platform: "Apple",
-      signed: "署名あり",
       register_title: "passkey の登録",
       register_lead: "{1} に {0} の passkey を作成します。Mac の pam-passkey add が検証して記録します。",
       rp_id: "passkey のサイト",
@@ -238,9 +230,15 @@ button:disabled { opacity: 0.45; cursor: default; }
     return list;
   }
 
-  function argvList(argv) {
-    if (!Array.isArray(argv)) return shown(null);
-    return element("ol", "argv", ...argv.map((arg) => element("li", null, shown(arg, 200))));
+  // argv as one command line, the way the Touch ID dialog writes it: an argument is quoted only
+  // when it is empty or has a space or a quote, so that argument boundaries stay visible.
+  function commandLine(argv, limit = 400) {
+    if (!Array.isArray(argv) || argv.length === 0) return shown(null);
+    const quoted = argv.map((arg) => {
+      const text = String(arg);
+      return text === "" || /[\s'"]/u.test(text) ? "'" + text.replaceAll("'", "'\\''") + "'" : text;
+    });
+    return shown(quoted.join(" "), limit);
   }
 
   function localTime(text) {
@@ -309,39 +307,33 @@ button:disabled { opacity: 0.45; cursor: default; }
     return "signed";
   }
 
-  function processName(process) {
-    const source = process.path || (Array.isArray(process.argv) && process.argv[0]) || "";
-    const name = String(source).split("/").pop();
-    return name || "pid " + process.pid;
-  }
-
-  function chain(processes) {
-    if (!Array.isArray(processes) || processes.length === 0) return element("p", "none", t("empty_chain"));
-    const list = element("ol", "chain");
-    // The request lists the caller first; draw it as pstree does, from launchd down.
-    const ordered = processes.slice().reverse();
-    ordered.forEach((entry, depth) => {
+  // One line per process, launchd first and the caller last, as in the Touch ID dialog:
+  // `<pid> <user> <command>`. A line opens to the process's details.
+  function tree(processes, details) {
+    if (!Array.isArray(processes) || processes.length === 0) return element("p", "block mono", shown(null));
+    const list = element("ol", "tree mono");
+    const who = (uid) => {
+      if (uid === 0) return shown("root");
+      if (uid === details.caller_uid && typeof details.user === "string") return shown(details.user, 32);
+      return shown(uid, 12);
+    };
+    for (const entry of processes.slice().reverse()) {
       const process = typeof entry === "object" && entry !== null ? entry : {};
       const kind = signingKind(process);
-      const signature = process.team_id
-        ? element("span", "sig", shown(process.signing_id, 60), " (", shown(process.team_id, 20), ")")
-        : element("span", "sig", shown(process.signing_id, 60));
-      const who = process.uid === 0 ? element("span", "who", "root") : element("span", "who", "uid ", shown(process.uid, 12));
-      const summary = element("summary", null, element("span", "name", shown(processName(process), 60)), signature, who, element("span", "badge", t(kind)));
-      const details = element("details", null, summary, facts([
-        [t("pid"), shown(process.pid)],
-        [t("uid"), shown(process.uid)],
+      const command = Array.isArray(process.argv) && process.argv.length > 0 ? commandLine(process.argv, 300) : shown(process.path, 300);
+      const cell = element("span", "cmd", command);
+      if (kind === "unsigned" || kind === "adhoc") cell.append(element("span", "mark", t(kind)));
+      const pid = typeof process.pid === "number" ? String(process.pid).padStart(5, "0") : null;
+      const summary = element("summary", null, shown(pid), element("span", "who", who(process.uid)), cell);
+      list.append(element("li", null, element("details", null, summary, facts([
         [t("cwd"), shown(process.cwd, 240)],
         [t("path"), shown(process.path, 240)],
-        [t("argv"), argvList(process.argv)],
+        [t("uid"), shown(process.uid)],
         [t("signing_id"), shown(process.signing_id)],
         [t("team_id"), shown(process.team_id)],
         [t("signer"), shown(process.signer)],
-      ]));
-      const item = element("li", kind + (depth === ordered.length - 1 ? " caller" : ""), details);
-      item.style.marginLeft = Math.min(depth, 12) * 0.5 + "rem";
-      list.append(item);
-    });
+      ]))));
+    }
     return list;
   }
 
@@ -494,23 +486,27 @@ button:disabled { opacity: 0.45; cursor: default; }
     const remaining = countdown(expiresAt, () => {
       if (state === "idle" || state === "asking") finish(t("expired"), "bad");
     });
+    const caller = Array.isArray(details.processes) && typeof details.processes[0] === "object" ? details.processes[0] : null;
+    const context = facts([
+      [t("host"), shown(details.host, 120)],
+      [t("user"), shown(details.user, 80)],
+      [t("caller_uid"), shown(details.caller_uid)],
+      [t("tty"), shown(details.tty)],
+      [t("time"), localTime(details.time)],
+      [t("expires"), element("span", null, localTime(request.expires), " ", remaining)],
+    ]);
+    context.classList.add("context");
     app.replaceChildren(
       element("h1", null, t("approve_title")),
-      element("p", "lead", ...sentence("approve_lead", shown(details.host, 80), shown(details.user, 60))),
-      facts([
-        [t("host"), shown(details.host, 120)],
-        [t("user"), shown(details.user, 80)],
-        [t("caller_uid"), shown(details.caller_uid)],
-        [t("tty"), shown(details.tty)],
-        [t("time"), localTime(details.time)],
-        [t("expires"), element("span", null, localTime(request.expires), " ", remaining)],
-      ]),
-      element("h2", null, t("argv")),
-      argvList(details.argv),
-      element("h2", null, t("chain")),
-      chain(details.processes),
+      element("h2", null, t("command")),
+      element("p", "block mono", commandLine(details.argv)),
+      element("h2", null, t("cwd")),
+      element("p", "block mono", shown(caller ? caller.cwd : null, 240)),
+      element("h2", null, t("tree")),
+      tree(details.processes, details),
       element("div", "actions", approveButton, ...(touchButton ? [touchButton] : []), rejectButton),
       status,
+      context,
     );
     slowPoll();
   }
