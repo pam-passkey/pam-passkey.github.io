@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-jjgYyZhTcr1JWELcsW4+4a480zA6pKvcDWmvG0h3mvo='; style-src 'sha256-mw44W0L2wH3qSrsmbCxneSbe5kJ/7g23rUrI8Fqbjbo='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-6X0ZWGEsxNmj0jAAy4yiuy6Yqnn3yCxDBBvX8pNT2ts='; style-src 'sha256-9FAlcc1mM6cexKgVwEREHHJXoVKOsgAppO1W3PI/DjY='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -31,8 +31,9 @@ ol.chain summary { cursor: pointer; overflow-wrap: anywhere; }
 ol.chain .name { font-weight: 600; }
 ol.chain .sig, ol.chain .who { color: var(--muted); margin-left: 0.4rem; }
 .badge { font-size: 0.75rem; border-radius: 3px; padding: 0 0.3rem; margin-left: 0.4rem; border: 1px solid var(--line); white-space: nowrap; }
-li.unsigned { border-left-color: var(--warn); }
-li.unsigned .badge, li.adhoc .badge { color: var(--warn); border-color: var(--warn); }
+li.warn { border-left-color: var(--warn); }
+li.warn .badge { color: var(--warn); border-color: var(--warn); }
+li.ok .badge { color: var(--ok); border-color: var(--ok); }
 li.caller { border-left-color: var(--accent); }
 ol.chain dl.facts { font-size: 0.9rem; margin-left: 0.4rem; }
 .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0 0.75rem; }
@@ -100,12 +101,7 @@ button:disabled { opacity: 0.45; cursor: default; }
       uid: "uid",
       cwd: "cwd",
       path: "Path",
-      signing_id: "Signing ID",
-      team_id: "Team ID",
-      signer: "Signer",
-      unsigned: "unsigned, or the signature failed to verify",
-      adhoc: "ad-hoc signed (no certificate)",
-      certificate: "certificate (issuer not verified)",
+      no_signature: "The request carries no signature verification for this process.",
       register_title: "Register a passkey",
       register_lead: "Create a passkey for {0} on {1}. pam-passkey add on the Mac checks it and records it.",
       rp_id: "Passkey site",
@@ -157,12 +153,7 @@ button:disabled { opacity: 0.45; cursor: default; }
       uid: "uid",
       cwd: "cwd",
       path: "実行パス",
-      signing_id: "署名 ID",
-      team_id: "Team ID",
-      signer: "署名者",
-      unsigned: "署名なし、または署名の検証に失敗",
-      adhoc: "ad-hoc 署名 (証明書なし)",
-      certificate: "証明書あり (発行元は未検証)",
+      no_signature: "このプロセスの署名の検証結果は要求に含まれていません。",
       register_title: "passkey の登録",
       register_lead: "{1} に {0} の passkey を作成します。Mac の pam-passkey add が検証して記録します。",
       rp_id: "passkey のサイト",
@@ -333,15 +324,140 @@ button:disabled { opacity: 0.45; cursor: default; }
     line.className = tone || "";
   }
 
-  // Only what the request's fields say, without judging names: the PAM module does not yet check
-  // which root a certificate chains to (docs/issue/2026-11-15-signing-badge-anchored-trust.md), so
-  // no mark claims who signed. No signing ID is "unsigned or failed to verify" (the module does not
-  // tell the two apart), a signing ID without a signer is an ad-hoc signature, and a signer means
-  // a certificate whose issuer is not verified.
-  function signingKind(process) {
-    if (!process.signing_id) return "unsigned";
-    if (!process.signer) return "adhoc";
-    return "certificate";
+  // The signature of each process as the PAM module verified it (pam-passkey DR-0014,
+  // exchange-format `signature`). The module decides the trust mark and every element; the page
+  // only maps the values to words and colors through these tables, and never judges from names.
+  // A value the tables do not know is shown as it is, without a mark color.
+  const SIGNATURE = {
+    en: {
+      label: "Signature",
+      marks: {
+        apple: "Apple software",
+        developer_id_notarized: "Developer ID (notarized)",
+        developer_id: "Developer ID (not notarized)",
+        mac_app_store: "Mac App Store",
+        development: "Development certificate",
+        apple_issued_other: "Other certificate issued by Apple",
+        other_certificate: "Certificate not from Apple (self-signed etc.)",
+        adhoc: "Ad-hoc signature (no certificate)",
+        failed: "Signature verification failed",
+        unsigned: "Unsigned",
+        not_checked: "Not verified (out of time)",
+      },
+      keys: {
+        status: "Signature verification",
+        failure: "Why it failed",
+        certificate: "Certificate",
+        linker_signed: "Signed by the linker",
+        anchor: "Root of the certificate",
+        certificate_kind: "Kind of certificate",
+        notarization: "Notarization",
+        platform_binary: "Platform binary",
+        hardened_runtime: "Hardened runtime",
+        identifier: "Identifier",
+        team_id: "Team ID",
+        signer: "Signer name",
+      },
+      values: {
+        status: { verified: "succeeded", failed: "failed", unsigned: "unsigned", not_checked: "not verified (out of time)" },
+        failure: { replaced: "the executable was updated or replaced while it ran", missing: "the executable is gone", other: "other" },
+        certificate: { none: "none (ad-hoc signature)", present: "present" },
+        linker_signed: { yes: "yes", no: "no" },
+        anchor: { apple: "Apple's own software", apple_issued: "a certificate Apple issued", other: "not Apple (self-signed or another authority)" },
+        certificate_kind: { developer_id: "Developer ID", mac_app_store: "Mac App Store", development: "development (Apple Development)", other: "other" },
+        notarization: { notarized: "notarized", not_notarized: "not notarized" },
+        platform_binary: { yes: "yes", no: "no" },
+        hardened_runtime: { yes: "yes", no: "no" },
+      },
+    },
+    ja: {
+      label: "署名",
+      marks: {
+        apple: "Apple のソフトウェア",
+        developer_id_notarized: "Developer ID (公証済み)",
+        developer_id: "Developer ID (公証なし)",
+        mac_app_store: "Mac App Store",
+        development: "開発用の証明書",
+        apple_issued_other: "Apple が発行したその他の証明書",
+        other_certificate: "Apple 以外の証明書 (自己署名など)",
+        adhoc: "ad-hoc 署名 (証明書なし)",
+        failed: "署名の検証に失敗",
+        unsigned: "署名なし",
+        not_checked: "未検証 (時間切れ)",
+      },
+      keys: {
+        status: "署名の検証",
+        failure: "失敗の理由",
+        certificate: "証明書",
+        linker_signed: "linker が付けた署名",
+        anchor: "証明書の根",
+        certificate_kind: "証明書の種類",
+        notarization: "公証",
+        platform_binary: "プラットフォームバイナリ",
+        hardened_runtime: "hardened runtime",
+        identifier: "identifier",
+        team_id: "Team ID",
+        signer: "署名者名",
+      },
+      values: {
+        status: { verified: "検証に成功", failed: "検証に失敗", unsigned: "署名なし", not_checked: "未検証 (時間切れ)" },
+        failure: { replaced: "走っている間に実行ファイルが更新・差し替えされた", missing: "実行ファイルが消えている", other: "その他" },
+        certificate: { none: "無し (ad-hoc 署名)", present: "あり" },
+        linker_signed: { yes: "はい", no: "いいえ" },
+        anchor: { apple: "Apple 自身のソフトウェア", apple_issued: "Apple が発行した証明書", other: "Apple 以外 (自己署名、独自の認証局)" },
+        certificate_kind: { developer_id: "Developer ID", mac_app_store: "Mac App Store", development: "開発用 (Apple Development)", other: "その他" },
+        notarization: { notarized: "済み", not_notarized: "なし" },
+        platform_binary: { yes: "はい", no: "いいえ" },
+        hardened_runtime: { yes: "あり", no: "なし" },
+      },
+    },
+  }[language];
+  // Green for Apple's own software, red for what has no confirmed identity, no color otherwise.
+  const MARK_TONES = { apple: "ok", other_certificate: "warn", adhoc: "warn", failed: "warn", unsigned: "warn", not_checked: "warn" };
+  // Marks shown with the Team ID beside them; the failed mark is shown with its reason.
+  const MARKS_WITH_TEAM = ["developer_id_notarized", "developer_id", "mac_app_store", "development"];
+  // The elements in the order the details list them; the last three are strings as signed.
+  const SIGNATURE_KEYS = ["status", "failure", "certificate", "linker_signed", "anchor", "certificate_kind",
+    "notarization", "platform_binary", "hardened_runtime", "identifier", "team_id", "signer"];
+  const SIGNATURE_TEXTS = ["identifier", "team_id", "signer"];
+
+  // The words for `value` in `table`, or the value itself (made visible) when the table does not know it.
+  function word(table, value, limit) {
+    return Object.hasOwn(table, value) ? element("span", "value", table[value]) : shown(value, limit);
+  }
+
+  // The request's `signature` object, or null when it is missing or not an object.
+  function signatureOf(process) {
+    const signature = process.signature;
+    return typeof signature === "object" && signature !== null && !Array.isArray(signature) ? signature : null;
+  }
+
+  // The badge and what goes beside it on a process's line.
+  function markOf(signature) {
+    if (!signature || typeof signature.mark !== "string") return { tone: null, nodes: [] };
+    const mark = signature.mark;
+    const nodes = [element("span", "badge", word(SIGNATURE.marks, mark, 40))];
+    if (MARKS_WITH_TEAM.includes(mark) && typeof signature.team_id === "string") {
+      nodes.push(element("span", "sig", SIGNATURE.keys.team_id + " ", shown(signature.team_id, 20)));
+    }
+    if (mark === "failed" && typeof signature.failure === "string") {
+      nodes.push(element("span", "sig", word(SIGNATURE.values.failure, signature.failure, 40)));
+    }
+    return { tone: Object.hasOwn(MARK_TONES, mark) ? MARK_TONES[mark] : null, nodes };
+  }
+
+  // The elements of the signature that apply: an element the module left null does not apply to
+  // this process (e.g. notarization outside Developer ID) and gets no line.
+  function signatureFacts(signature) {
+    if (!signature) return [[SIGNATURE.label, element("span", "value none", t("no_signature"))]];
+    const rows = [];
+    for (const key of SIGNATURE_KEYS) {
+      const value = signature[key];
+      if (typeof value !== "string") continue;
+      const shownValue = SIGNATURE_TEXTS.includes(key) ? shown(value) : word(SIGNATURE.values[key], value, 80);
+      rows.push([SIGNATURE.keys[key], shownValue]);
+    }
+    return rows;
   }
 
   function processName(process) {
@@ -357,23 +473,21 @@ button:disabled { opacity: 0.45; cursor: default; }
     const ordered = processes.slice().reverse();
     ordered.forEach((entry, depth) => {
       const process = typeof entry === "object" && entry !== null ? entry : {};
-      const kind = signingKind(process);
-      const signature = element("span", "sig", shown(process.signing_id, 60));
+      const signature = signatureOf(process);
+      const mark = markOf(signature);
+      const identifier = element("span", "sig", shown(signature && typeof signature.identifier === "string" ? signature.identifier : null, 60));
       const who = process.uid === 0 ? element("span", "who", "root") : element("span", "who", "uid ", shown(process.uid, 12));
-      const badge = element("span", "badge", t(kind));
-      const team = kind === "certificate" && process.team_id ? [element("span", "sig", t("team_id") + " ", shown(process.team_id, 20))] : [];
-      const summary = element("summary", null, element("span", "name", shown(processName(process), 60)), signature, who, badge, ...team);
+      const summary = element("summary", null, element("span", "name", shown(processName(process), 60)), identifier, who, ...mark.nodes);
       const details = element("details", null, summary, facts([
         [t("pid"), shown(process.pid)],
         [t("uid"), shown(process.uid)],
         [t("cwd"), shown(process.cwd, 240)],
         [t("path"), shown(process.path, 240)],
         [t("argv"), argvList(process.argv)],
-        [t("signing_id"), shown(process.signing_id)],
-        [t("team_id"), shown(process.team_id)],
-        [t("signer"), shown(process.signer)],
+        ...signatureFacts(signature),
       ]));
-      const item = element("li", kind + (depth === ordered.length - 1 ? " caller" : ""), details);
+      const classes = [mark.tone, depth === ordered.length - 1 ? "caller" : null].filter(Boolean).join(" ");
+      const item = element("li", classes || null, details);
       item.style.marginLeft = Math.min(depth, 12) * 0.5 + "rem";
       list.append(item);
     });
