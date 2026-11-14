@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-aMorX5oLclD6YEDMA7dDJQ31Hud9A99rwb5LDM5/wxo='; style-src 'sha256-UBMnHm7kXpUhTmcdmEi7Xs+e1Zd4uMHz6VNChpO50Nw='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-pAVle5KZtRG4LQ43IMHbsQ5miaw5adTU+T701EfuItc='; style-src 'sha256-UBMnHm7kXpUhTmcdmEi7Xs+e1Zd4uMHz6VNChpO50Nw='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -60,11 +60,10 @@ button:disabled { opacity: 0.45; cursor: default; }
       intro: "This page approves authentication requests and registers passkeys for pam-passkey. Open it through the URL that pam-passkey on your Mac shows or sends.",
       project: "About pam-passkey",
       loading: "Loading the request…",
-      bad_url: "The URL does not point to a request.",
-      fetch_failed: "Could not load the request ({0}).",
-      gone: "The request has expired or has already ended (HTTP {0}).",
-      too_large: "The request is larger than {0} bytes and was not read.",
-      bad_request: "This is not a request this page can show.",
+      bad_url: "This URL is broken or in an older form, so it does not open a request. Run the command on the Mac again and open the new URL.",
+      fetch_failed: "Could not load the request ({0}). Check the connection, or run the command on the Mac again.",
+      gone: "The request has expired or has already ended (HTTP {0}). Run the command on the Mac again if you still need it.",
+      bad_request: "The request could not be decrypted or read, so nothing is shown. Run the command on the Mac again and open the new URL.",
       approve_title: "Authentication request",
       host: "Host",
       user: "User",
@@ -116,11 +115,10 @@ button:disabled { opacity: 0.45; cursor: default; }
       intro: "pam-passkey の認証の承認と passkey の登録を行うページです。Mac の pam-passkey が表示・送信する URL から開いてください。",
       project: "pam-passkey について",
       loading: "要求を読み込んでいます…",
-      bad_url: "URL が要求を指していません。",
-      fetch_failed: "要求を読み込めませんでした ({0})。",
-      gone: "要求は期限切れか、既に終了しています (HTTP {0})。",
-      too_large: "要求が {0} バイトを超えているため読み込みません。",
-      bad_request: "このページで表示できる要求ではありません。",
+      bad_url: "URL が壊れているか古い形式のため、要求を開けません。Mac でコマンドをやり直し、新しい URL を開いてください。",
+      fetch_failed: "要求を読み込めませんでした ({0})。通信を確かめるか、Mac でコマンドをやり直してください。",
+      gone: "要求は期限切れか、既に終了しています (HTTP {0})。必要なら Mac でコマンドをやり直してください。",
+      bad_request: "要求を復号・解釈できなかったため、何も表示しません。Mac でコマンドをやり直し、新しい URL を開いてください。",
       approve_title: "認証の要求",
       host: "ホスト",
       user: "ユーザ",
@@ -264,6 +262,42 @@ button:disabled { opacity: 0.45; cursor: default; }
     const url = new URL(String(text));
     if (url.protocol !== "https:") throw new Error("not https");
     return url;
+  }
+
+  // The fragment after the optional mark touch-id: is `r=<presigned GET, percent-encoded>&k=<key>`
+  // with exactly these two names (exchange-format 承認 URL と登録 URL の fragment).
+  function readLink(fragment) {
+    const local = fragment.startsWith("touch-id:");
+    const rest = local ? fragment.slice("touch-id:".length) : fragment;
+    const values = new Map();
+    for (const pair of rest.split("&")) {
+      const at = pair.indexOf("=");
+      const name = at < 0 ? pair : pair.slice(0, at);
+      if (at < 0 || (name !== "r" && name !== "k") || values.has(name)) throw new Error("fragment");
+      values.set(name, pair.slice(at + 1));
+    }
+    if (values.size !== 2) throw new Error("fragment");
+    const key = base64urlToBytes(values.get("k"));
+    if (key.length !== 32) throw new Error("key");
+    return { local, url: httpsUrl(decodeURIComponent(values.get("r"))), key };
+  }
+
+  // The envelope (DR-0013, exchange-format 封筒): version 1, kind (1 approve, 2 register), a 12-byte
+  // IV, then AES-256-GCM ciphertext and tag, with the first two bytes as associated data. Returns
+  // the parsed plaintext, whose kind must be the envelope's; anything else throws.
+  const ENVELOPE_KINDS = { 1: "approve", 2: "register" };
+  async function openEnvelope(bytes, keyBytes) {
+    const kind = ENVELOPE_KINDS[bytes[1]];
+    if (bytes.length < 30 || bytes[0] !== 1 || kind === undefined) throw new Error("envelope");
+    const key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["decrypt"]);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: bytes.subarray(2, 14), additionalData: bytes.subarray(0, 2), tagLength: 128 },
+      key,
+      bytes.subarray(14),
+    );
+    const payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext));
+    if (typeof payload !== "object" || payload === null || payload.kind !== kind) throw new Error("kind");
+    return payload;
   }
 
   const fetchOptions = { cache: "no-store", credentials: "omit", redirect: "error", referrerPolicy: "no-referrer" };
@@ -582,10 +616,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   }
 
   async function main() {
-    let fragment = location.hash.slice(1);
-    // pam-passkey marks the URL it opens on the Mac itself; the rest is the request's URL.
-    const local = fragment.startsWith("touch-id:");
-    if (local) fragment = fragment.slice("touch-id:".length);
+    const fragment = location.hash.slice(1);
     if (!fragment) {
       const link = element("a", null, t("project"));
       link.href = "https://github.com/kawaz/pam-passkey";
@@ -593,32 +624,40 @@ button:disabled { opacity: 0.45; cursor: default; }
       app.replaceChildren(element("h1", null, t("title")), element("p", null, t("intro")), element("p", null, link));
       return;
     }
-    let url;
+    // pam-passkey marks the URL it opens on the Mac itself (local); the rest names the
+    // envelope and the key that opens it. Nothing is shown or signed unless all of it holds.
+    let link;
     try {
-      url = httpsUrl(fragment);
+      link = readLink(fragment);
     } catch {
       return message(t("bad_url"), "bad");
     }
     message(t("loading"));
     let bytes;
     try {
-      const response = await fetch(url, fetchOptions);
+      const response = await fetch(link.url, fetchOptions);
       if (!response.ok) return message(t("gone", response.status), "bad");
       bytes = new Uint8Array(await response.arrayBuffer());
     } catch (error) {
       return message(t("fetch_failed", error.message), "bad");
     }
-    if (bytes.length > MAX_PAYLOAD) return message(t("too_large", MAX_PAYLOAD), "bad");
-    // The challenge is the SHA-256 of exactly the bytes shown (DR-0006).
+    let payload;
+    try {
+      if (bytes.length > MAX_PAYLOAD) throw new Error("too large");
+      payload = await openEnvelope(bytes, link.key);
+    } catch {
+      return message(t("bad_request"), "bad");
+    } finally {
+      link.key.fill(0);
+    }
+    // The challenge is the SHA-256 of exactly the envelope that was opened and shown (DR-0006).
     const challenge = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
     try {
-      const payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-      if (payload && payload.kind === "approve") return approve(payload, challenge, local);
-      if (payload && payload.kind === "register") return register(payload, challenge);
+      if (payload.kind === "approve") return approve(payload, challenge, link.local);
+      return register(payload, challenge);
     } catch {
-      // Falls through to the message below.
+      message(t("bad_request"), "bad");
     }
-    message(t("bad_request"), "bad");
   }
 
   window.addEventListener("hashchange", () => location.reload());
