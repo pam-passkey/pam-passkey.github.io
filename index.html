@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-AONXR9PqlWGlzHWaWYjQ9SM5Vgmzm1cYx2d+JCznOWI='; style-src 'sha256-8Ehi8w3aUOx0nLO798BajurdiqU01FLSZjA1lAGIQLs='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-CjYeF0gCYJ9lhOjBrwQO1P2dkwAYABSOqa0btbPQRkw='; style-src 'sha256-reUUjmxGqbIz6tYEEOi5zHQCR+u5X+rbFfo0Y/+7dHc='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -36,12 +36,12 @@ li.warn .badge { color: var(--warn); border-color: var(--warn); }
 li.ok .badge { color: var(--ok); border-color: var(--ok); }
 li.caller { border-left-color: var(--accent); }
 ol.chain dl.facts { font-size: 0.9rem; margin-left: 0.4rem; }
-.actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0 0.75rem; }
+.actions { display: grid; grid-template-columns: 1fr; gap: 0.75rem; margin: 1.5rem 0 0.75rem; }
+.actions.pair { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.actions.pair > .danger { grid-column: 1 / -1; }
 button { font: inherit; font-weight: 600; padding: 0.65rem 1.2rem; border-radius: 8px; border: 1px solid var(--line); background: var(--chip); color: var(--fg); cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button.choice { width: 16rem; }
 button.danger { background: transparent; border-color: var(--warn); color: var(--warn); }
-@media (max-width: 30rem) { button.choice { width: 100%; } }
 button:disabled { opacity: 0.45; cursor: default; }
 #status { min-height: 1.5rem; font-weight: 600; }
 #status.ok { color: var(--ok); }
@@ -525,10 +525,11 @@ button:disabled { opacity: 0.45; cursor: default; }
     if (typeof details !== "object" || details === null || Number.isNaN(expiresAt)) throw new Error("request");
 
     const status = statusLine();
-    // The two ways to approve look alike (blue, one size); rejecting is red and not filled.
-    const approveButton = element("button", "primary choice", t("approve"));
+    // The two ways to approve look alike (blue, one size, side by side when the width allows);
+    // rejecting is red, not filled, and takes the whole row below them.
+    const approveButton = element("button", "primary", t("approve"));
     const rejectButton = element("button", "danger", t("reject"));
-    const touchButton = touchUrl ? element("button", "primary choice", t("touch")) : null;
+    const touchButton = touchUrl ? element("button", "primary", t("touch")) : null;
     // The Mac takes one request per press of "Show details" in its dialog (DR-0004), so the
     // button stays usable; it is off only while its PUT is on the way, so a press sends once.
     let touchSending = false;
@@ -668,7 +669,7 @@ button:disabled { opacity: 0.45; cursor: default; }
       argvList(details.argv),
       element("h2", null, t("chain")),
       chain(details.processes),
-      element("div", "actions", ...(touchButton ? [touchButton] : []), approveButton, rejectButton),
+      element("div", touchButton ? "actions pair" : "actions", ...(touchButton ? [touchButton] : []), approveButton, rejectButton),
       status,
     );
     slowPoll();
