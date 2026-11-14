@@ -2,7 +2,7 @@
 
 The approval and registration page of [pam-passkey](https://github.com/kawaz/pam-passkey), served by GitHub Pages at `https://pam-passkey.github.io/`.
 
-`index.html` is the whole page: no external scripts, styles or fonts. It reads the presigned URL in its fragment (`https://pam-passkey.github.io/#<presigned GET>`), fetches the request, and shows an approval (`kind: approve`) or a registration (`kind: register`). The formats are documented in pam-passkey's `docs/design/exchange-format.md`.
+`index.html` is the whole page: no external scripts, styles or fonts. It reads its fragment (`https://pam-passkey.github.io/#r=<presigned GET, percent-encoded>&k=<key, base64url>`, or `#touch-id:r=…&k=…` when pam-passkey opens it on the Mac), fetches the envelope at `r`, decrypts it with `k`, and shows an approval (`kind: approve`) or a registration (`kind: register`). If the key is missing or the envelope cannot be decrypted, it shows nothing of the request and does not sign. The formats are documented in pam-passkey's `docs/design/exchange-format.md`.
 
 The Content-Security-Policy in `<meta>` allows the inline script and style by their SHA-256. After editing either, recompute both hashes and replace them in the policy:
 
