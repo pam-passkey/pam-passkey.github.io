@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-6X0ZWGEsxNmj0jAAy4yiuy6Yqnn3yCxDBBvX8pNT2ts='; style-src 'sha256-9FAlcc1mM6cexKgVwEREHHJXoVKOsgAppO1W3PI/DjY='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-PcwAqyyk371ojBBnmlL0zMsjnT5Q0ld8cmbYkpKb2rs='; style-src 'sha256-8Ehi8w3aUOx0nLO798BajurdiqU01FLSZjA1lAGIQLs='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -39,6 +39,9 @@ ol.chain dl.facts { font-size: 0.9rem; margin-left: 0.4rem; }
 .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0 0.75rem; }
 button { font: inherit; font-weight: 600; padding: 0.65rem 1.2rem; border-radius: 8px; border: 1px solid var(--line); background: var(--chip); color: var(--fg); cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.choice { width: 16rem; }
+button.danger { background: transparent; border-color: var(--warn); color: var(--warn); }
+@media (max-width: 30rem) { button.choice { width: 100%; } }
 button:disabled { opacity: 0.45; cursor: default; }
 #status { min-height: 1.5rem; font-weight: 600; }
 #status.ok { color: var(--ok); }
@@ -79,8 +82,8 @@ button:disabled { opacity: 0.45; cursor: default; }
       empty_chain: "No process information was sent.",
       approve: "Approve with passkey",
       reject: "Reject",
-      touch: "Use Touch ID on this Mac",
-      touch_sent: "Asked the Mac for Touch ID. Answer the dialog on this Mac.",
+      touch: "Approve with Touch ID",
+      touch_sent: "Asked the Mac for Touch ID. Approve in the dialog on this Mac. If no dialog appears, the last one closed some other way than \"Show details\" (a failed Touch ID, for one); approve with the passkey instead.",
       touch_failed: "Could not ask the Mac for Touch ID ({0}).",
       remaining: "{0} s left",
       waiting_passkey: "Waiting for the passkey…",
@@ -130,9 +133,9 @@ button:disabled { opacity: 0.45; cursor: default; }
       chain: "プロセスの系譜 (上が launchd、一番下が呼び出し元。行を押すと詳細)",
       empty_chain: "プロセス情報は送られていません。",
       approve: "passkey で承認",
-      reject: "拒否",
-      touch: "この Mac の Touch ID で認証",
-      touch_sent: "Mac に Touch ID を求めました。この Mac のダイアログで認証してください。",
+      reject: "拒否する",
+      touch: "Touch ID で承認",
+      touch_sent: "Mac に Touch ID を求めました。この Mac のダイアログで承認してください。ダイアログが出ない時は、前のダイアログが「詳細を確認」以外 (Touch ID の失敗など) で閉じています。passkey で承認してください。",
       touch_failed: "Mac に Touch ID を求められませんでした ({0})。",
       remaining: "残り {0} 秒",
       waiting_passkey: "passkey の操作を待っています…",
@@ -510,7 +513,8 @@ button:disabled { opacity: 0.45; cursor: default; }
   }
 
   // `local`: opened by pam-passkey on the Mac from "Show details" (the touch-id: mark), which
-  // alone offers Touch ID on this Mac (DR-0004).
+  // alone offers "Approve with Touch ID" (DR-0004; the helper marks the URL only on a Mac whose
+  // biometry is Touch ID).
   function approve(request, challenge, local) {
     const details = request.details;
     const assertionUrl = httpsUrl(request.assertion_put_url);
@@ -521,17 +525,19 @@ button:disabled { opacity: 0.45; cursor: default; }
     if (typeof details !== "object" || details === null || Number.isNaN(expiresAt)) throw new Error("request");
 
     const status = statusLine();
-    const approveButton = element("button", "primary", t("approve"));
-    const rejectButton = element("button", null, t("reject"));
-    const touchButton = touchUrl ? element("button", null, t("touch")) : null;
-    // The Mac answers the first request only, so the button is pressed once.
-    let touchAsked = false;
+    // The two ways to approve look alike (blue, one size); rejecting is red and not filled.
+    const approveButton = element("button", "primary choice", t("approve"));
+    const rejectButton = element("button", "danger", t("reject"));
+    const touchButton = touchUrl ? element("button", "primary choice", t("touch")) : null;
+    // The Mac takes one request per press of "Show details" in its dialog (DR-0004), so the
+    // button stays usable; it is off only while its PUT is on the way, so a press sends once.
+    let touchSending = false;
     // idle → asking (passkey dialog) → sent (answer PUT, fast poll) → done.
     let state = "idle";
     const enable = (on) => {
       approveButton.disabled = !on;
       rejectButton.disabled = !on;
-      if (touchButton) touchButton.disabled = !on || touchAsked;
+      if (touchButton) touchButton.disabled = !on || touchSending;
     };
     const finish = (text, tone) => {
       state = "done";
@@ -614,22 +620,26 @@ button:disabled { opacity: 0.45; cursor: default; }
         signature: bytesToBase64url(response.signature),
       }), t("sent"));
     });
-    // Touch ID on this Mac: the helper watches the touch object and shows its dialog (DR-0004).
+    // "Approve with Touch ID": the helper watches the touch object and shows its dialog (DR-0004).
     if (touchButton) {
       touchButton.addEventListener("click", async () => {
-        if (state !== "idle" || touchAsked) return;
-        touchAsked = true;
+        if (state !== "idle" || touchSending) return;
+        touchSending = true;
         touchButton.disabled = true;
+        let text;
+        let tone;
         try {
           const response = await put(touchUrl, "touch");
-          if (state !== "idle") return;
-          if (response.ok || response.status === 412) return setStatus(status, t("touch_sent"));
-          setStatus(status, t("touch_failed", "HTTP " + response.status), "bad");
+          // 412: a request is already in the store (write-once); it counts as asked.
+          if (response.ok || response.status === 412) text = t("touch_sent");
+          else [text, tone] = [t("touch_failed", "HTTP " + response.status), "bad"];
         } catch (error) {
-          touchAsked = false;
-          touchButton.disabled = state !== "idle" || Date.now() >= expiresAt;
-          setStatus(status, t("touch_failed", error.message), "bad");
+          [text, tone] = [t("touch_failed", error.message), "bad"];
         }
+        touchSending = false;
+        if (state !== "idle") return;
+        touchButton.disabled = Date.now() >= expiresAt;
+        setStatus(status, text, tone);
       });
     }
     // A refusal is unsigned content in the assertion's place (DR-0006).
@@ -658,7 +668,7 @@ button:disabled { opacity: 0.45; cursor: default; }
       argvList(details.argv),
       element("h2", null, t("chain")),
       chain(details.processes),
-      element("div", "actions", approveButton, ...(touchButton ? [touchButton] : []), rejectButton),
+      element("div", "actions", ...(touchButton ? [touchButton] : []), approveButton, rejectButton),
       status,
     );
     slowPoll();
