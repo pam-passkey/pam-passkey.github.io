@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-PcwAqyyk371ojBBnmlL0zMsjnT5Q0ld8cmbYkpKb2rs='; style-src 'sha256-8Ehi8w3aUOx0nLO798BajurdiqU01FLSZjA1lAGIQLs='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-AONXR9PqlWGlzHWaWYjQ9SM5Vgmzm1cYx2d+JCznOWI='; style-src 'sha256-8Ehi8w3aUOx0nLO798BajurdiqU01FLSZjA1lAGIQLs='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -83,7 +83,7 @@ button:disabled { opacity: 0.45; cursor: default; }
       approve: "Approve with passkey",
       reject: "Reject",
       touch: "Approve with Touch ID",
-      touch_sent: "Asked the Mac for Touch ID. Approve in the dialog on this Mac. If no dialog appears, the last one closed some other way than \"Show details\" (a failed Touch ID, for one); approve with the passkey instead.",
+      touch_sent: "Asked the Mac for Touch ID. Approve in the dialog on this Mac. No dialog comes after Touch ID became unusable or the last dialog closed with the screen lock; then approve with the passkey.",
       touch_failed: "Could not ask the Mac for Touch ID ({0}).",
       remaining: "{0} s left",
       waiting_passkey: "Waiting for the passkey…",
@@ -135,7 +135,7 @@ button:disabled { opacity: 0.45; cursor: default; }
       approve: "passkey で承認",
       reject: "拒否する",
       touch: "Touch ID で承認",
-      touch_sent: "Mac に Touch ID を求めました。この Mac のダイアログで承認してください。ダイアログが出ない時は、前のダイアログが「詳細を確認」以外 (Touch ID の失敗など) で閉じています。passkey で承認してください。",
+      touch_sent: "Mac に Touch ID を求めました。この Mac のダイアログで承認してください。Touch ID が使えなくなった時や、画面のロック等で前のダイアログが閉じた時は出ないので、passkey で承認してください。",
       touch_failed: "Mac に Touch ID を求められませんでした ({0})。",
       remaining: "残り {0} 秒",
       waiting_passkey: "passkey の操作を待っています…",
