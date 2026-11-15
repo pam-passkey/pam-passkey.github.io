@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-cwFWtb9mukESwAko7Pd/IQiYwz/t5p71T78FcOy+9IA='; style-src 'sha256-pODVzMS+AjJk4fT4wxQj2j5zHBBoZeboHEM5dzZPGaw='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-I2H8uPZt2g254s9e1r/QgsybdYk0V5TAufD5HvYc4D4='; style-src 'sha256-gWaOFP17AFJU26D9TV8snaE2yDJXMgfAbSLy9sqxKMg='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -49,9 +49,6 @@ button:disabled { opacity: 0.45; cursor: default; }
 .note { display: block; font-size: 0.85rem; color: var(--muted); }
 .product { margin: 0.25rem 0 0; font-size: 0.85rem; font-weight: 600; color: var(--muted); }
 .time, .left { font-variant-numeric: tabular-nums; }
-.left .remaining { display: inline-grid; }
-.left .remaining > span { grid-area: 1 / 1; }
-.left .remaining > .sizer { visibility: hidden; }
 </style>
 </head>
 <body>
@@ -536,14 +533,11 @@ button:disabled { opacity: 0.45; cursor: default; }
     return t("minutes", Math.floor(seconds / 60), String(seconds % 60).padStart(2, "0"));
   }
 
-  // "left / whole" (whole: from `createdAt` to `expiresAt`), updated every second. The time
-  // left starts at the cell's left edge like every other value, in a box as wide as the whole, so
-  // " / whole" does not move as digits drop.
+  // "left / whole" (whole: from `createdAt` to `expiresAt`), updated every second.
   function countdown(createdAt, expiresAt, onExpired) {
     const whole = Number.isNaN(createdAt) ? null : Math.max(0, Math.round((expiresAt - createdAt) / 1000));
     const left = element("span", null);
-    const remaining = element("span", "remaining", left, element("span", "sizer", whole === null ? "" : duration(whole)));
-    const cell = element("span", "left", remaining, whole === null ? "" : " / " + duration(whole));
+    const cell = element("span", "left", left, whole === null ? "" : " / " + duration(whole));
     const tick = () => {
       const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
       left.textContent = duration(seconds);
