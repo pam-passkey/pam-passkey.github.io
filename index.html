@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-+CM8lbB+VoW9/TPuYMYvTVIrXanNlkawP/gB4iuJaAw='; style-src 'sha256-sLZZNsXWSMuuTcRD6RYUho1ERY0YThHeoU0RtOefkU8='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-cwFWtb9mukESwAko7Pd/IQiYwz/t5p71T78FcOy+9IA='; style-src 'sha256-pODVzMS+AjJk4fT4wxQj2j5zHBBoZeboHEM5dzZPGaw='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -17,7 +17,7 @@ h2 { font-size: 1rem; margin: 1.25rem 0 0.4rem; color: var(--muted); font-weight
 p { margin: 0.4rem 0; }
 .lead { font-weight: 600; }
 dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.9rem; margin: 0.5rem 0; }
-dl.facts dt { color: var(--muted); }
+dl.facts dt { color: var(--muted); text-align: right; }
 dl.facts dd { margin: 0; overflow-wrap: anywhere; }
 .value { white-space: pre-wrap; overflow-wrap: anywhere; }
 .none { color: var(--muted); }
@@ -46,10 +46,11 @@ button:disabled { opacity: 0.45; cursor: default; }
 #status { min-height: 1.5rem; font-weight: 600; }
 #status.ok { color: var(--ok); }
 #status.bad { color: var(--warn); }
+.note { display: block; font-size: 0.85rem; color: var(--muted); }
 .product { margin: 0.25rem 0 0; font-size: 0.85rem; font-weight: 600; color: var(--muted); }
 .time, .left { font-variant-numeric: tabular-nums; }
 .left .remaining { display: inline-grid; }
-.left .remaining > span { grid-area: 1 / 1; text-align: right; }
+.left .remaining > span { grid-area: 1 / 1; }
 .left .remaining > .sizer { visibility: hidden; }
 </style>
 </head>
@@ -112,12 +113,14 @@ button:disabled { opacity: 0.45; cursor: default; }
       path: "Path",
       no_signature: "The request carries no signature verification for this process.",
       register_title: "Register a passkey",
-      register_lead: "{0} asks to register a passkey for {1}. Register only if you started this yourself.",
-      os_user: "OS user",
+      register_user: "User",
       ids: "(uid {0} / gid {1})",
-      label: "Label",
-      rp_id: "Site (RP ID)",
+      register_label: "Label",
+      register_code: "Code",
+      register_code_check: "Check that it matches the code shown where you ran pam-passkey add (the terminal and the identity check dialog).",
+      register_url: "Registration URL",
       created: "Created",
+      register_expires: "Expires",
       register: "Register passkey",
       registered: "Sent the passkey to pam-passkey add on the Mac. See the result where it runs.",
       rejected_register: "Rejected. pam-passkey add on the Mac ends without registering.",
@@ -171,12 +174,14 @@ button:disabled { opacity: 0.45; cursor: default; }
       path: "実行パス",
       no_signature: "このプロセスの署名の検証結果は要求に含まれていません。",
       register_title: "passkey の登録",
-      register_lead: "{0} が {1} の passkey の登録を求めています。自分で始めた操作の場合だけ登録してください。",
-      os_user: "OS のユーザ",
+      register_user: "対象ユーザ",
       ids: "(uid {0} / gid {1})",
-      label: "ラベル",
-      rp_id: "登録先 (RP ID)",
+      register_label: "登録ラベル",
+      register_code: "登録コード",
+      register_code_check: "pam-passkey add を実行した端末 (と本人確認のダイアログ) に出ているコードと一致することを確かめてください。",
+      register_url: "登録URL",
       created: "作成日時",
+      register_expires: "登録期限",
       register: "passkey を登録",
       registered: "Mac の pam-passkey add に passkey を送りました。結果は add を実行した端末で確かめてください。",
       rejected_register: "拒否しました。Mac の pam-passkey add は登録せずに終わります。",
@@ -532,7 +537,8 @@ button:disabled { opacity: 0.45; cursor: default; }
   }
 
   // "left / whole" (whole: from `createdAt` to `expiresAt`), updated every second. The time
-  // left is right-aligned in a box as wide as the whole, so nothing moves as digits drop.
+  // left starts at the cell's left edge like every other value, in a box as wide as the whole, so
+  // " / whole" does not move as digits drop.
   function countdown(createdAt, expiresAt, onExpired) {
     const whole = Number.isNaN(createdAt) ? null : Math.max(0, Math.round((expiresAt - createdAt) / 1000));
     const left = element("span", null);
@@ -716,6 +722,9 @@ button:disabled { opacity: 0.45; cursor: default; }
     slowPoll();
   }
 
+  // The registration code (DR-0011 登録コード): XXXX-XXXX in Crockford's base32 upper case.
+  const REGISTRATION_CODE = /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
+
   // The registration payload (exchange-format 登録ペイロード). Every key is required: a payload
   // without what the screen shows (an older pam-passkey add) is not one this page can show.
   function register(payload, challenge) {
@@ -725,7 +734,8 @@ button:disabled { opacity: 0.45; cursor: default; }
     const expiresAt = new Date(String(payload.expires)).getTime();
     const texts = ["rp_id", "host", "user", "label"].every((key) => typeof payload[key] === "string");
     const ids = [payload.uid, payload.gid].every((id) => Number.isInteger(id) && id >= 0);
-    if (!texts || !ids || Number.isNaN(createdAt) || Number.isNaN(expiresAt)) throw new Error("payload");
+    const code = typeof payload.code === "string" && REGISTRATION_CODE.test(payload.code);
+    if (!texts || !ids || !code || Number.isNaN(createdAt) || Number.isNaN(expiresAt)) throw new Error("payload");
     const status = statusLine();
     const button = element("button", "primary", t("register"));
     const rejectButton = element("button", "danger", t("reject"));
@@ -798,14 +808,16 @@ button:disabled { opacity: 0.45; cursor: default; }
     app.replaceChildren(
       element("p", "product", t("title")),
       element("h1", null, t("register_title")),
-      element("p", "lead", ...sentence("register_lead", shown(payload.host, 80), shown(payload.user, 60))),
+      // The same headings and values as the identity check of pam-passkey add (DR-0004), whose
+      // code the user compares with the one shown here.
       facts([
         [t("host"), shown(payload.host, 120)],
-        [t("os_user"), element("span", null, shown(payload.user, 80), " ", shown(t("ids", payload.uid, payload.gid)))],
-        [t("label"), shown(payload.label, 120)],
-        [t("rp_id"), shown(payload.rp_id, 120)],
+        [t("register_user"), element("span", null, shown(payload.user, 80), " ", shown(t("ids", payload.uid, payload.gid)))],
+        [t("register_label"), shown(payload.label, 120)],
+        [t("register_code"), element("span", null, shown(payload.code), element("span", "note", t("register_code_check")))],
+        [t("register_url"), shown(payload.rp_id, 120)],
         [t("created"), localTime(payload.time)],
-        [t("expires"), localTime(payload.expires)],
+        [t("register_expires"), localTime(payload.expires)],
         [t("left"), remaining],
       ]),
       element("div", "actions", button, rejectButton),
