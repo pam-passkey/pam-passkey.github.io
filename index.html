@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-nqP5uR2AloVA4Ed4jM+B2oShU+LF8dNWasnzAwRuLfw='; style-src 'sha256-gWaOFP17AFJU26D9TV8snaE2yDJXMgfAbSLy9sqxKMg='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-7EeAv7iEHyhamJZyUkTmS5nzEHxRmBez0kNHkiIV9XQ='; style-src 'sha256-gWaOFP17AFJU26D9TV8snaE2yDJXMgfAbSLy9sqxKMg='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -245,6 +245,16 @@ button:disabled { opacity: 0.45; cursor: default; }
       write(points.slice(points.length - tail));
     }
     return span;
+  }
+
+  // A value for the names the passkey is stored under (WebAuthn user.name / displayName), which
+  // the password manager and the passkey chooser show outside this page: the hidden characters
+  // shown() marks are spelled out the same way (\u{202e}), so the stored name cannot reorder or
+  // hide its text.
+  function stored(value) {
+    return Array.from(String(value), (point) =>
+      HIDDEN.test(point) ? "\\u{" + point.codePointAt(0).toString(16).padStart(4, "0") + "}" : point,
+    ).join("");
   }
 
   function facts(rows) {
@@ -736,6 +746,7 @@ button:disabled { opacity: 0.45; cursor: default; }
     const ids = [payload.uid, payload.gid].every((id) => Number.isInteger(id) && id >= 0);
     const code = typeof payload.code === "string" && REGISTRATION_CODE.test(payload.code);
     if (!texts || !ids || !code || Number.isNaN(createdAt) || Number.isNaN(expiresAt)) throw new Error("payload");
+    const account = stored(payload.user) + "@" + stored(payload.host);
     const status = statusLine();
     const button = element("button", "primary", t("register"));
     const rejectButton = element("button", "danger", t("reject"));
@@ -780,7 +791,9 @@ button:disabled { opacity: 0.45; cursor: default; }
           publicKey: {
             challenge,
             rp: { id: payload.rp_id, name: "pam-passkey" },
-            user: { id: userId, name: payload.user, displayName: payload.user },
+            // DR-0011: which Mac and which label the passkey is for, in the password manager's
+            // list and the passkey chooser.
+            user: { id: userId, name: account, displayName: stored(payload.label) + " (" + account + ")" },
             pubKeyCredParams: [{ type: "public-key", alg: -7 }],
             attestation: "none",
             authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
