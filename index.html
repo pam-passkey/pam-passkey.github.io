@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-I2H8uPZt2g254s9e1r/QgsybdYk0V5TAufD5HvYc4D4='; style-src 'sha256-gWaOFP17AFJU26D9TV8snaE2yDJXMgfAbSLy9sqxKMg='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-nqP5uR2AloVA4Ed4jM+B2oShU+LF8dNWasnzAwRuLfw='; style-src 'sha256-gWaOFP17AFJU26D9TV8snaE2yDJXMgfAbSLy9sqxKMg='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -110,6 +110,8 @@ button:disabled { opacity: 0.45; cursor: default; }
       path: "Path",
       no_signature: "The request carries no signature verification for this process.",
       register_title: "Register a passkey",
+      register_lead: "Register only if you started this yourself.",
+      register_host: "Host",
       register_user: "User",
       ids: "(uid {0} / gid {1})",
       register_label: "Label",
@@ -118,6 +120,7 @@ button:disabled { opacity: 0.45; cursor: default; }
       register_url: "Registration URL",
       created: "Created",
       register_expires: "Expires",
+      register_left: "Time left",
       register: "Register passkey",
       registered: "Sent the passkey to pam-passkey add on the Mac. See the result where it runs.",
       rejected_register: "Rejected. pam-passkey add on the Mac ends without registering.",
@@ -171,6 +174,8 @@ button:disabled { opacity: 0.45; cursor: default; }
       path: "実行パス",
       no_signature: "このプロセスの署名の検証結果は要求に含まれていません。",
       register_title: "passkey の登録",
+      register_lead: "自分で始めた操作の場合だけ登録してください。",
+      register_host: "ホスト名",
       register_user: "対象ユーザ",
       ids: "(uid {0} / gid {1})",
       register_label: "登録ラベル",
@@ -179,6 +184,7 @@ button:disabled { opacity: 0.45; cursor: default; }
       register_url: "登録URL",
       created: "作成日時",
       register_expires: "登録期限",
+      register_left: "残り時間",
       register: "passkey を登録",
       registered: "Mac の pam-passkey add に passkey を送りました。結果は add を実行した端末で確かめてください。",
       rejected_register: "拒否しました。Mac の pam-passkey add は登録せずに終わります。",
@@ -802,17 +808,18 @@ button:disabled { opacity: 0.45; cursor: default; }
     app.replaceChildren(
       element("p", "product", t("title")),
       element("h1", null, t("register_title")),
+      element("p", "lead", t("register_lead")),
       // The same headings and values as the identity check of pam-passkey add (DR-0004), whose
       // code the user compares with the one shown here.
       facts([
-        [t("host"), shown(payload.host, 120)],
+        [t("register_host"), shown(payload.host, 120)],
         [t("register_user"), element("span", null, shown(payload.user, 80), " ", shown(t("ids", payload.uid, payload.gid)))],
         [t("register_label"), shown(payload.label, 120)],
         [t("register_code"), element("span", null, shown(payload.code), element("span", "note", t("register_code_check")))],
         [t("register_url"), shown(payload.rp_id, 120)],
         [t("created"), localTime(payload.time)],
         [t("register_expires"), localTime(payload.expires)],
-        [t("left"), remaining],
+        [t("register_left"), remaining],
       ]),
       element("div", "actions", button, rejectButton),
       status,
