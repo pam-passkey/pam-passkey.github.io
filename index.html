@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-7EeAv7iEHyhamJZyUkTmS5nzEHxRmBez0kNHkiIV9XQ='; style-src 'sha256-gWaOFP17AFJU26D9TV8snaE2yDJXMgfAbSLy9sqxKMg='; connect-src https:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-PB/sD4pUnShtuvqfDOkXW+aYdBV0ZLLlpBh7PHfb/ws='; style-src 'sha256-gWaOFP17AFJU26D9TV8snaE2yDJXMgfAbSLy9sqxKMg='; connect-src https:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>pam-passkey</title>
 <style>
@@ -212,8 +212,11 @@ button:disabled { opacity: 0.45; cursor: default; }
   }
 
   // Shown values come from the request, which anyone holding the URL could have written:
-  // control, bidi and invisible characters are made visible, and shortened values say so.
-  const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufeff\ufff9-\ufffb]/u;
+  // control characters (Cc), the line and paragraph separators, format characters (Cf: bidi
+  // controls, zero-width characters, tag characters, …) and the Hangul fillers, which look like
+  // spaces, are made visible, and shortened values say so. The same set as pam-passkey's escape
+  // (DR-0004).
+  const HIDDEN = /[\p{Cc}\p{Cf}\u2028\u2029\u115f\u1160\u3164\uffa0]/u;
   function shown(value, limit = 160) {
     const span = element("span", "value");
     if (value === null || value === undefined) {
